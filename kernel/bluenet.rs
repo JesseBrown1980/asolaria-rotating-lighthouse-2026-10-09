@@ -40,6 +40,10 @@
 #[path = r"C:\asolaria-acer\asolaria-os\kernel\core\src\tribit\mod.rs"]
 mod tribit;
 
+// ONE shared fold (2026-10-09): never a per-kernel copy. Reads P/K from tribit.
+#[path = r"C:\tmp\scout-rooms-20261008\common\fold.rs"]
+mod fold;
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use tribit::{prism, unprism, K, P};
@@ -172,15 +176,8 @@ fn hbp(tag: &str, kv: &[(&str, String)]) -> String {
     r
 }
 fn fold_lanes(corpus: &[u8]) -> [u64; K] {
-    let m = P as u128;
-    let mut lanes = [0u64; K];
-    let mut roll: u128 = 1;
-    for (pos, &b) in corpus.iter().enumerate() {
-        let j = pos % K;
-        lanes[j] = ((lanes[j] as u128 + ((b as u128) + 1) * roll) % m) as u64;
-        roll = roll * 131 % m;
-    }
-    lanes
+    // lossy linear sketch, byte-identical to the old body; see common/fold.rs
+    fold::sketch_lanes(corpus)
 }
 
 /// The three-state activation. The zero has WIDTH: inside the dead band the answer is Nil, a real

@@ -30,12 +30,20 @@
 #[path = r"C:\asolaria-acer\asolaria-os\kernel\core\src\tribit\mod.rs"]
 mod tribit;
 
+// ONE shared fold (2026-10-09): never a per-kernel copy. Reads P/K from tribit.
+#[path = r"C:\tmp\scout-rooms-20261008\common\fold.rs"]
+mod fold;
+
 use std::collections::BTreeSet;
 use std::fs;
 use std::path::Path;
 use tribit::{prism, unprism, Register, TritWord, Zero, K, P};
 
-const OUT: &str = r"C:\tmp\scout-rooms-20261008\lighthouse-out";
+// V2 writes beside V1, never over it.
+const OUT: &str = r"C:\tmp\scout-rooms-20261008\lighthouse-out-v2";
+/// One independent base per hose station (station 0 keeps the canonical 131). Roll starts at 1
+/// for every station: a station-dependent starting roll is a GAIN, not a different beam.
+const STATION_BASES: [u64; 5] = [131, 137, 139, 149, 151];
 const SOUND: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 fn sha256(data: &[u8]) -> [u8; 32] {
@@ -150,9 +158,14 @@ fn reg_name(r: Register) -> &'static str {
         Register::Blue => "blue",
     }
 }
-/// Fold a byte stream into the 27 integer lanes, weighted by the hose position so each station of
-/// the drill illuminates the signal differently.
-fn fold(data: &[u8], station: usize) -> [u64; K] {
+/// V2 beam: each station folds with its OWN base (and its lane shift) via the shared module.
+fn fold_station(data: &[u8], station: usize) -> [u64; K] {
+    fold::sketch_lanes_with(data, STATION_BASES[station], station)
+}
+
+/// V1 beam, KEPT ONLY AS THE LIVE FALSIFIER. `roll = 1 + station` makes every station
+/// `(1+s) x rotate_s(station 0)`: one reading at five gains. V2 must not reproduce this.
+fn fold_v1_gain(data: &[u8], station: usize) -> [u64; K] {
     let m = P as u128;
     let mut l = [0u64; K];
     let mut roll: u128 = 1 + station as u128;
@@ -201,16 +214,35 @@ fn main() {
     rows.push(hbp(
         "LIGHTHOUSEHDR",
         &[
-            ("schema", "ASOLARIA-ROTATING-LIGHTHOUSE-V1".to_string()),
+            ("schema", "ASOLARIA-ROTATING-LIGHTHOUSE-V2".to_string()),
+            (
+                "corrects",
+                "V1 fold roll=1+station (gain, not beam) and 15 sweep rows counted as 15 tests"
+                    .to_string(),
+            ),
             ("seat", "ACER-CLAUDE-FABLE5".to_string()),
             ("pid", "8467a937cba309f7".to_string()),
             ("owner", "OP-JESSE".to_string()),
-            ("stamp", "2026-10-08".to_string()),
-            ("law", "Law 31, the rainbow lighthouse drill: a conduit with a fixed traversal order".to_string()),
-            ("hose", "translucent tip -> red -> green -> blue -> translucent tail".to_string()),
-            ("free_registers", "zero and translucent, never computed".to_string()),
+            ("stamp", "2026-10-09".to_string()),
+            ("station_bases", "131,137,139,149,151".to_string()),
+            (
+                "law",
+                "Law 31, the rainbow lighthouse drill: a conduit with a fixed traversal order"
+                    .to_string(),
+            ),
+            (
+                "hose",
+                "translucent tip -> red -> green -> blue -> translucent tail".to_string(),
+            ),
+            (
+                "free_registers",
+                "zero and translucent, never computed".to_string(),
+            ),
             ("tail_measured", "0".to_string()),
-            ("anti", "Zero::rotate, order 3, R cubed = identity and R != R squared".to_string()),
+            (
+                "anti",
+                "Zero::rotate, order 3, R cubed = identity and R != R squared".to_string(),
+            ),
             ("sound_samples", n.to_string()),
             ("sound_distinct_values", distinct.len().to_string()),
             ("sound_sha256", hex(&d)),
@@ -222,7 +254,37 @@ fn main() {
         ],
     ));
 
-    // ---- THE SWEEP: 5 hose stations x 3 anti turns = 15 returns ----
+    // ---- THE BEAMS: the fold does not depend on the anti turn, so there are exactly 5 beams.
+    // V1 recomputed them 3x and counted 15 tests; V2 computes each once and says so.
+    let hose_len = Register::HOSE.len();
+    let beams: Vec<[u64; K]> = (0..hose_len).map(|s| fold_station(bytes, s)).collect();
+    let beams_v1: Vec<[u64; K]> = (0..hose_len).map(|s| fold_v1_gain(bytes, s)).collect();
+    let prop_v2: Vec<Option<u64>> = (0..hose_len)
+        .map(|s| fold::proportional_shifted(&beams[s], &beams[0], s))
+        .collect();
+    let prop_v1: Vec<Option<u64>> = (0..hose_len)
+        .map(|s| fold::proportional_shifted(&beams_v1[s], &beams_v1[0], s))
+        .collect();
+    let v2_proportional = (1..hose_len).filter(|&s| prop_v2[s].is_some()).count();
+    let v1_proportional = (1..hose_len).filter(|&s| prop_v1[s].is_some()).count();
+    let v1_gains: Vec<String> = (1..hose_len)
+        .map(|s| prop_v1[s].map_or("none".to_string(), |c| c.to_string()))
+        .collect();
+    let spec_shas: BTreeSet<String> = beams
+        .iter()
+        .map(|l| {
+            hex(&sha256(
+                prism(l)
+                    .iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<_>>()
+                    .join(",")
+                    .as_bytes(),
+            ))
+        })
+        .collect();
+
+    // ---- THE SWEEP: 5 hose stations x 3 anti turns = 15 rows (5 beams, each shown 3 times) ----
     let mut returns: Vec<(usize, u64, String, bool)> = Vec::new();
     let mut free_stations = 0usize;
     let mut costing_stations = 0usize;
@@ -236,7 +298,7 @@ fn main() {
                 }
             }
             // the beam: fold the sound at this station, transform, and listen
-            let lanes = fold(bytes, sidx);
+            let lanes = beams[sidx];
             let spec = prism(&lanes);
             let back = unprism(&spec);
             let exact = back == lanes;
@@ -250,7 +312,10 @@ fn main() {
                     ("register", reg_name(*reg).to_string()),
                     ("free", u8::from(reg.is_free()).to_string()),
                     ("free_centre_X0", spec[0].to_string()),
-                    ("roundtrip", if exact { "EXACT" } else { "FAIL" }.to_string()),
+                    (
+                        "roundtrip",
+                        if exact { "EXACT" } else { "FAIL" }.to_string(),
+                    ),
                     ("trits_now", g),
                     (
                         "spectrum_sha16",
@@ -302,17 +367,65 @@ fn main() {
             ),
             ("trits_before", trits0.clone()),
             ("trits_after_3_turns", trits3.clone()),
+            ("sweep_rows", returns.len().to_string()),
+            ("unique_beams", hose_len.to_string()),
+            ("beam_depends_on_turn", "0".to_string()),
+            ("distinct_spectra", spec_shas.len().to_string()),
+            ("trit_glyphs_vary_with", "turn_not_station".to_string()),
+            (
+                "v2_stations_proportional_to_station0",
+                v2_proportional.to_string(),
+            ),
+            (
+                "v1_stations_proportional_to_station0",
+                v1_proportional.to_string(),
+            ),
+            ("v1_gains_mod_P", v1_gains.join(",")),
         ],
     ));
     rows.push(hbp(
         "MEASURED_IS",
         &[
-            ("claim", "the anti closes the sweep after exactly three turns".to_string()),
+            ("claim", "the V1 hose stations were one beam at five gains; the V2 stations are not".to_string()),
             (
                 "obtained",
-                format!("27 trits rotated three times returned to {trits0}, identical to the start"),
+                format!(
+                    "V1: {v1_proportional} of {} stations are c x rotate(station 0), gains {}; V2: {v2_proportional} of {} are; {} distinct V2 spectra",
+                    hose_len - 1,
+                    v1_gains.join(","),
+                    hose_len - 1,
+                    spec_shas.len()
+                ),
             ),
-            ("falsifier", "a trit differing after three rotations".to_string()),
+            ("scope", "non-proportional is NOT independent: all five are linear sketches of the same 62 bytes".to_string()),
+            ("falsifier", "a V2 station whose lanes equal c x shifted station-0 lanes mod P".to_string()),
+        ],
+    ));
+    // content gate: the V1 fault must reproduce and V2 must not, or this run refuses to write.
+    assert_eq!(
+        v1_proportional,
+        hose_len - 1,
+        "V1 gain fault did not reproduce"
+    );
+    assert_eq!(v2_proportional, 0, "V2 stations still proportional");
+    assert_eq!(spec_shas.len(), hose_len, "V2 spectra not distinct");
+    rows.push(hbp(
+        "MEASURED_IS",
+        &[
+            (
+                "claim",
+                "the anti closes the sweep after exactly three turns".to_string(),
+            ),
+            (
+                "obtained",
+                format!(
+                    "27 trits rotated three times returned to {trits0}, identical to the start"
+                ),
+            ),
+            (
+                "falsifier",
+                "a trit differing after three rotations".to_string(),
+            ),
         ],
     ));
     rows.push(hbp(

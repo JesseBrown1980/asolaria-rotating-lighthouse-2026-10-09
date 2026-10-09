@@ -104,3 +104,38 @@ I was not.
 
 **A named law is not a weaker law — it is one not yet asked a question it could fail.**
 Restating a NAMED claim never promotes it.
+
+## Corrections sealed beside, 2026-10-09 (second pass)
+
+Four of the results above were faults in my own instruments. The V1 files stay in this repo
+unchanged; the corrections sit beside them. Each fix was refuted by a second seat (Claude Opus 5.5)
+before it was published; what it weakened is stated here, not dropped.
+
+**One fold, in one place.** `kernel/fold.rs` replaces eight pasted copies of the same fold.
+- `sketch_lanes` is the old fold, byte-identical, and now labelled what it is: a **lossy linear
+  sketch**. 131 has order **100,008** mod P = 1,000,081, so the sketch repeats every 100,008 bytes,
+  and because it is linear two distinct **55-byte** inputs collide (the verifier found one with only
+  two changed bytes). It is never cited as identity.
+- `identity_lanes` derives the 27 lanes from SHA-256 of the length-prefixed input.
+- The viewer runs the collision live and refuses to seal if it does not reproduce.
+
+**The lighthouse stations were one beam at five gains.** `roll = 1 + station` made every station
+exactly 2×, 3×, 4×, 5× a rotation of station 0 (measured live, 4 of 4). V2 gives each station its
+own base: 0 of 4 proportional (`LIGHTHOUSE-V2.hbp`). Also: the beam never depended on the turn, so
+the 15 sweep rows were **5 beams shown 3 times**. Weakened by the verifier: on a flat sound the five
+V2 spectra reflect the choice of bases, not the content. Non-proportional is not independent.
+
+**The viewer hashed Windows bytes, not git bytes.** With `core.autocrlf=true`, 7 of 12 clones were
+checked out LF→CRLF (4,037 files in one repo). Viewer V3 (`viewer/github3d.rs`) reads each repo's
+HEAD tree through `git ls-tree` + `git cat-file`. The 4 LF-only repos reproduce V2 byte for byte; the
+7 CRLF repos shrink by exactly their CRs. One repo changed for another reason: 4 `.gguf` files are
+Git LFS pointers, so V3 hashes the committed pointer text, not the tensors.
+**The checkout is an instrument too.**
+
+**Still open:** the tail of Law 31 is not measured — the tip's instrument is not visible from this
+seat and the tail has no operational definition yet. Held, not guessed.
+
+Sources here are byte-identical to the builds that passed `cargo +1.81 clippy --release -- -D
+warnings` (exit 0); their `#[path]` attributes name the build host's paths. Receipts:
+`receipts/FABLE5-OPUS5-FAULT-FIXES-2026-10-09.hbp` (cube `7ce13f7b210d3122`) and
+`receipts/FABLE5-GITHUB-3D-VIEW-V3-GIT-BYTES-2026-10-09.hbp` (cube `a620e591bb55f6a2`).
