@@ -229,6 +229,8 @@ struct RepoView {
     commit: String,
     admitted: usize,
     held: usize,
+    /// (repo-relative path, reason, bytes or "-") per held file; never any content
+    held_files: Vec<(String, &'static str, String)>,
     corpus_bytes: usize,
     sha: String,
     sh: String,
@@ -351,21 +353,30 @@ fn view_repo(slug: &str, root: &Path) -> RepoView {
     let mut framed: Vec<u8> = Vec::new();
     let mut admitted = 0usize;
     let mut held = 0usize;
+    let mut held_files: Vec<(String, &'static str, String)> = Vec::new();
     for entry in entries {
         let rel = Path::new(&entry.path);
+        let path_s = entry.path.clone();
         if is_held(rel) {
             held += 1;
+            let n = entry
+                .bytes
+                .as_ref()
+                .map_or("-".to_string(), |b| b.len().to_string());
+            held_files.push((path_s, "HELD_PATH", n));
             continue;
         }
         let raw = match entry.bytes {
             Some(r) => r,
             None => {
                 held += 1;
+                held_files.push((path_s, "NOT_REGULAR_BLOB", "-".to_string()));
                 continue;
             }
         };
         if raw.contains(&0) || std::str::from_utf8(&raw).is_err() {
             held += 1;
+            held_files.push((path_s, "NUL_OR_NON_UTF8", raw.len().to_string()));
             continue;
         }
         if SECRET_NEEDLES
@@ -373,6 +384,7 @@ fn view_repo(slug: &str, root: &Path) -> RepoView {
             .any(|needle| raw.windows(needle.len()).any(|w| w == *needle))
         {
             held += 1;
+            held_files.push((path_s, "SECRET_PATTERN", raw.len().to_string()));
             continue;
         }
         corpus.extend_from_slice(&raw);
@@ -397,6 +409,7 @@ fn view_repo(slug: &str, root: &Path) -> RepoView {
         commit: git_head(root),
         admitted,
         held,
+        held_files,
         corpus_bytes: corpus.len(),
         sh: sha[..16].to_string(),
         sha,
@@ -493,7 +506,7 @@ fn main() {
     rows.push(hbp_row(
         "GITHUB3DHDR",
         &[
-            ("schema", "ASOLARIA-GITHUB-3D-VIEW-V3".to_string()),
+            ("schema", "ASOLARIA-GITHUB-3D-VIEW-V4".to_string()),
             (
                 "bytes_source",
                 "git_cat_file_HEAD_tree_not_working_tree".to_string(),
@@ -518,6 +531,7 @@ fn main() {
             ("free_fourth_zero", "HTTP-0_OMEGA_PORTAL_NAMED".to_string()),
             ("traversal", "HBI->HBP->SHA->SH->HASH".to_string()),
             ("repos", views.len().to_string()),
+            ("held_listed", "1".to_string()),
             ("reuse", "asolaria-os/kernel/core/tribit".to_string()),
             ("E", "0".to_string()),
         ],
@@ -573,6 +587,28 @@ fn main() {
                 ("framed_sha", v.framed_sha.clone()),
             ],
         ));
+        for (hp, reason, n) in &v.held_files {
+            // path only (separators neutralised); no matched content is ever written
+            let safe: String = hp
+                .chars()
+                .map(|c| {
+                    if matches!(c, '|' | '\n' | '\r') {
+                        '?'
+                    } else {
+                        c
+                    }
+                })
+                .collect();
+            rows.push(hbp_row(
+                "HELDFILE",
+                &[
+                    ("repo", v.slug.clone()),
+                    ("path", safe),
+                    ("reason", (*reason).to_string()),
+                    ("bytes", n.clone()),
+                ],
+            ));
+        }
         for j in 0..K {
             let d0 = (j % 3) as i8 - 1;
             let d1 = ((j / 3) % 3) as i8 - 1;
@@ -692,6 +728,20 @@ fn main() {
                 "sha256_over_sorted_repo=commit=framed_sha_lines_LF".to_string(),
             ),
             ("hash2", hex(&sha256(merkle2_src.as_bytes()))),
+            // V4b: the held list is bound into the seal, not only into the file sidecar
+            (
+                "method3",
+                "sha256_over_HELDFILE_rows_in_emit_order_LF".to_string(),
+            ),
+            ("hash3", {
+                let held_src = rows
+                    .iter()
+                    .filter(|r| r.starts_with("HELDFILE|"))
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                hex(&sha256(held_src.as_bytes()))
+            }),
             ("float_used", "0".to_string()),
             (
                 "all_roundtrip_exact",

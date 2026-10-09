@@ -139,3 +139,9 @@ Sources here are byte-identical to the builds that passed `cargo +1.81 clippy --
 warnings` (exit 0); their `#[path]` attributes name the build host's paths. Receipts:
 `receipts/FABLE5-OPUS5-FAULT-FIXES-2026-10-09.hbp` (cube `7ce13f7b210d3122`) and
 `receipts/FABLE5-GITHUB-3D-VIEW-V3-GIT-BYTES-2026-10-09.hbp` (cube `a620e591bb55f6a2`).
+
+**V4b (same day, after the second seat's next pass).** The viewer now lists every file it holds back
+(`HELDFILE` rows: path, reason, size — never content), and the held list is bound into the seal as
+`hash3`. Every pre-existing field is identical to V3 (12/12 repos, 324/324 cube cells, `hash` and
+`hash2` unchanged). `fold.rs` gained six tests and its proportionality check no longer returns a
+gain of zero. Receipt: `receipts/FABLE5-GITHUB-3D-VIEW-V4B-HELD-LISTED-2026-10-09.hbp` (cube `a254f182f9efccac`).
